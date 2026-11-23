@@ -20,7 +20,7 @@ const text=(s,x,y,size=12,color='#f7eddd',align='left',font='Barlow Condensed')=
 function loadSave(){const base={shards:0,rank:1,damage:0,health:0,controls:{opacity:.82,scale:1},spins:{clan:20,element:20,bloodline:20,dojutsu:20},obtained:{clan:[],element:[],bloodline:[],dojutsu:[]},identity:{name:'Kaito',hair:'Spiked',hairColor:'#171922',skin:'#d69a72',outfit:'#263d55',headband:true},clan:null,element:null,bloodline:null,dojutsu:null,rinnegan:false,bijuuCards:[],equippedBijuu:null,gates:0,style:null,achievements:[],story:0};try{const old=JSON.parse(localStorage.getItem('ashesSave'))||{};return {...base,...old,spins:{...base.spins,...old.spins},obtained:{...base.obtained,...old.obtained},identity:{...base.identity,...old.identity},controls:{...base.controls,...old.controls}}}catch{return base}}
 function persist(){localStorage.setItem('ashesSave',JSON.stringify(saved))}
 function freshPlayer(){const clan=saved.clan;const maxHp=100+saved.health*10+(clan==='Senju'?15:0)+(clan==='Uzumaki'?10:0),maxChakra=100+(clan==='Uzumaki'?30:0);return {x:116,y:0,vx:0,vy:0,w:28,h:46,face:1,hp:maxHp,maxHp,chakra:maxChakra,maxChakra,stamina:100,maxStamina:100,onGround:false,coyote:0,jumpBuffer:0,jumpHeld:false,attackTimer:0,attackType:'',attackHit:false,comboStep:0,comboWindow:0,dashTimer:0,dashCooldown:0,dashDir:1,invuln:0,guard:false,parryTimer:0,guardBreak:0,hitstun:0,skillCooldown:0,skill2Cooldown:0,charging:false,dead:false,anim:0,airAttack:false,killFlash:0}}
-function initRun(){player=freshPlayer();enemies=[];particles=[];projectiles=[];floaters=[];wave=1;runCoins=0;killCount=0;cameraX=0;screenMode='play';modalOpen=false;modal.classList.remove('open');screen.classList.remove('visible');spawnWave();message='CLEAR THE PASS';messageTimer=2.2;}
+function initRun(){player=freshPlayer();enemies=[];particles=[];projectiles=[];floaters=[];wave=1;runCoins=0;killCount=0;cameraX=0;runUpgrades=[];activeEffects=[];chapterIndex=0;roomIndex=0;storyActive=true;worldWidth=2380;runSelectedReward=false;screenMode='play';modalOpen=false;modal.classList.remove('open');screen.classList.remove('visible');showChapterMap();}
 function spawnWave(){let specs=wave===1?[['scout',740],['blade',1070],['scout',1450]]:wave===2?[['blade',690],['caster',1120],['assassin',1590]]:[['boss',1660]];for(const [type,x] of specs)enemies.push(makeEnemy(type,x));}
 function makeEnemy(type,x){const defs={scout:{hp:30,w:27,h:42,speed:80,range:58,damage:9,cd:1.55,color:'#708276',name:'ROGUE SCOUT'},blade:{hp:48,w:32,h:48,speed:62,range:66,damage:13,cd:1.8,color:'#9b5548',name:'SWORD RUNNER'},assassin:{hp:40,w:27,h:44,speed:126,range:55,damage:11,cd:1.25,color:'#765d9c',name:'ASH ASSASSIN'},caster:{hp:38,w:28,h:45,speed:42,range:240,damage:12,cd:2,color:'#497e9a',name:'SEAL CASTER'},boss:{hp:260,w:76,h:94,speed:52,range:120,damage:22,cd:2.05,color:'#ae493d',name:'THE HOLLOW WARDEN'}};let d=defs[type],scale=difficulty==='EASY'?.75:difficulty==='HARD'?1.4:difficulty==='NIGHTMARE'?1.9:difficulty==='LEGENDARY'?2.5:1;return {...d,type,x,y:GROUND-d.h,vx:0,hp:d.hp*scale,maxHp:d.hp*scale,face:-1,cd:rnd(.4,1.3),state:'approach',tell:0,attackTimer:0,hitstun:0,flash:0,dead:false,hitBy:0,phase:0}}
 const GROUND=430;
@@ -84,6 +84,92 @@ function closeModal(){modal.classList.remove('open');modalOpen=false;if(screenMo
 
 // Core playable prototype: fixed-step combat, menus, progression and room rewards.
 let paused=false, lastRoomReward=0, selectedSpin='clan', runUpgrades=[], activeEffects=[];
+
+// Compact Chapter 1–8 run graph. It keeps the exact story progression and
+// branching route behavior while remaining deterministic and save-compatible.
+const STORY_CHAPTERS=[
+  {name:'The Cinder Border',rooms:['Cinder Road','Ash Market','Watch Shrine','Ember Bridge','Warden Gate'],boss:'THE HOLLOW WARDEN'},
+  {name:'The Fallen Compound',rooms:['Outer Gate','Training Yard','Armory Walk','Clan Archive','Burned Dais'],boss:'ASHEN CLANMASTER'},
+  {name:'The Hollow Province',rooms:['Fog Trail','Mire Crossing','Root Tunnel','Silent Village','Province Heart'],boss:'THE ROOT SERPENT'},
+  {name:'The Black Canyon',rooms:['Canyon Rim','Wind Cut','Ore Lift','Fallen Span','Canyon Vault'],boss:'GENERAL KUROHA'},
+  {name:'The Frost Frontier',rooms:['Snow Causeway','Glass Pines','Ice Shrine','North Barracks','White Peak'],boss:'THE FROST SHOGUN'},
+  {name:'The Crimson Coast',rooms:['Red Wharf','Tide Market','Salt Caves','Reef Temple','Drowned Deck'],boss:'ADMIRAL AKAI'},
+  {name:'The Sealed Capital',rooms:['Capital Road','Ink District','Moon Bridge','Celestial Keep','Throne Plaza'],boss:'THE SEAL EMPEROR'},
+  {name:'The Ashen Leaf',rooms:['Hidden Leaf Gate','Old Academy','Hospital Ruins','Ancestral Ridge','Final Monument'],boss:'THE ASHEN SHADOW'}
+];
+let chapterIndex=0, roomIndex=0, storyActive=false, storyRewardCount=0, runSelectedReward=false, currentRoom={};
+
+const RUN_CARD_DB=[
+  {name:'Sharpened Edge',category:'Passive Buff',rarity:'Uncommon',description:'Strike damage increases for this run.',effect:'+12% strike damage',code:'damage',art:'⚔'},
+  {name:'Vitality Seal',category:'Buff',rarity:'Rare',description:'A seal reinforces your life force.',effect:'+18 maximum health',code:'health',art:'心'},
+  {name:'Chakra Reservoir',category:'Buff',rarity:'Uncommon',description:'A reserve of chakra restores your technique energy.',effect:'Restore 40 chakra',code:'chakra',art:'水'},
+  {name:'Swift Current',category:'Passive Buff',rarity:'Common',description:'Move with a lighter, quicker step.',effect:'+12 movement speed',code:'speed',art:'風'},
+  {name:'Iron Guard',category:'Passive Buff',rarity:'Rare',description:'Your guard can withstand greater pressure.',effect:'+25 maximum stamina',code:'guard',art:'盾'},
+  {name:'Ember Step',category:'Passive Buff',rarity:'Epic',description:'Refine your dash recovery.',effect:'Dash cooldown −15%',code:'dash',art:'火'},
+  {name:'Sealing Focus',category:'Passive Buff',rarity:'Rare',description:'Technique seals return to readiness sooner.',effect:'Skill cooldown −12%',code:'focus',art:'封'},
+  {name:'Hunter’s Instinct',category:'Passive Buff',rarity:'Epic',description:'Read an attack and meet it with precise timing.',effect:'Parry window +0.10 sec',code:'parry',art:'眼'},
+  {name:'Second Wind',category:'Support',rarity:'Common',description:'Recover from the last exchange.',effect:'Restore 30 health',code:'heal',art:'光'}
+];
+function storyRewardOptions(count){
+  const pool=[...RUN_CARD_DB];
+  for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}
+  return pool.slice(0,Math.min(count,pool.length));
+}
+
+function applyRunReward(r){
+  if(r==='damage')player.damageBonus=(player.damageBonus||0)+.12;
+  if(r==='health'){player.maxHp+=18;player.hp=Math.min(player.maxHp,player.hp+18)}
+  if(r==='chakra')player.chakra=Math.min(player.maxChakra,player.chakra+40);
+  if(r==='speed')player.speedBonus=(player.speedBonus||0)+25;
+  if(r==='guard')player.maxStamina+=25;
+  if(r==='dash')player.dashReduction=(player.dashReduction||0)+.15;
+  if(r==='focus')player.skillReduction=(player.skillReduction||0)+.12;
+  if(r==='parry')player.parryBonus=(player.parryBonus||0)+.10;
+  if(r==='heal')player.hp=Math.min(player.maxHp,player.hp+30);
+  runUpgrades.push(r);
+}
+
+function startStoryRoom(){
+  storyActive=true; wave=roomIndex+1;
+  const chapter=STORY_CHAPTERS[chapterIndex];
+  roomName=chapter.rooms[roomIndex]||chapter.name;
+  player.x=116; player.vx=0; cameraX=0;
+  enemies=[]; projectiles=[];
+  const count=Math.min(8,2+chapterIndex+roomIndex%2);
+  for(let i=0;i<count;i++){
+    const types=['scout','blade','assassin','caster'];
+    const type=roomIndex===4?'boss':types[(i+chapterIndex)%types.length];
+    const e=makeEnemy(type,650+i*170+(i%2)*35);
+    if(roomIndex===4){e.name=chapter.boss;e.hp=e.maxHp=260*(1+chapterIndex*.28);e.damage=20+chapterIndex*3;e.w=82;e.h=100;e.type='boss'}
+    enemies.push(e);
+  }
+  worldWidth=2380+count*120;
+  message=`CHAPTER ${chapterIndex+1} · ${roomName}`; messageTimer=2.5;
+}
+
+function showChapterMap(){
+  modalOpen=true; modal.classList.add('open');
+  const ch=STORY_CHAPTERS[chapterIndex];
+  modal.innerHTML=`<div class="modal-card map-modal"><p class="eyebrow">CHAPTER ${chapterIndex+1} · ${ch.name}</p><h2>BRANCH ROUTE</h2><div class="reward-grid route-grid">${ch.rooms.map((n,i)=>`<button class="reward-card ${i===roomIndex?'selected':''}" data-route="${i}"><strong>${i+1}. ${n}</strong><small>${i===4?'Boss · '+ch.boss:i===0?'Scout path':'Branch encounter · '+(i%2?'elite':'normal')}</small></button>`).join('')}</div><div class="modal-actions"><button data-action="enter">ENTER SELECTED ROOM</button></div></div>`;
+  let selected=roomIndex; modal.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>{selected=+b.dataset.route;modal.querySelectorAll('[data-route]').forEach(x=>x.classList.remove('selected'));b.classList.add('selected')});
+  modal.querySelector('[data-action=enter]').onclick=()=>{roomIndex=selected;closeModal();startStoryRoom()};
+}
+
+function completeStoryRoom(){
+  if(!storyActive)return;
+  storyActive=false;
+  storyRewardCount=roomIndex===4?8:(roomIndex===3?7:roomIndex===2?6:roomIndex===1?5:4);
+  runSelectedReward=false;
+  showRewards();
+}
+
+function finishRoomChoice(){
+  closeModal();
+  if(roomIndex<4){roomIndex++;showChapterMap()}else{
+    chapterIndex++; roomIndex=0;
+    if(chapterIndex>=STORY_CHAPTERS.length){showVictory()}else showChapterMap();
+  }
+}
 const down=(...codes)=>codes.some(k=>keys.has(k));
 function damageEnemy(e,amount,knock=0){if(e.dead)return;e.hp-=amount;e.hitstun=.22;e.flash=.12;e.vx=knock;if(e.hp<=0){e.dead=true;killCount++;runCoins+=e.type==='boss'?30:8;floaters.push({x:e.x,y:e.y-30,text:`+${e.type==='boss'?30:8} EMBERS`,life:1,color:'#e4b46a'});for(let i=0;i<9;i++)particles.push({x:e.x+rnd(-14,14),y:e.y-rnd(8,38),vx:rnd(-90,90),vy:rnd(-130,20),life:rnd(.3,.8),color:'#e4b46a'});}}
 function attackPlayer(heavy=false){if(!player||player.dead||player.attackTimer>0||player.hitstun>0)return;player.attackType=heavy?'heavy':'light';player.attackTimer=heavy?.42:.28;player.attackHit=false;player.stamina=Math.max(0,player.stamina-(heavy?22:8));comboStep=(comboStep+1)%3;combo=comboStep+1;comboTimer=.9;}
@@ -103,7 +189,7 @@ function movePlayer(dt){const p=player;if(!p)return;const left=down('ArrowLeft',
 function updateEnemies(dt){for(const e of enemies){if(e.dead)continue;if(e.hitstun>0){e.hitstun-=dt;e.x+=e.vx*dt;e.vx*=Math.pow(.04,dt);continue}const dx=player.x-e.x,dist=Math.abs(dx);e.face=dx<0?-1:1;e.cd-=dt;if(e.type==='caster'&&dist<270&&dist>150){e.state='cast'}else if(dist>e.range){e.state='approach';e.x+=e.face*e.speed*dt}else if(e.cd<=0&&e.state!=='tell'){e.state='tell';e.tell=.56}
  if(e.state==='tell'){e.tell-=dt;if(e.tell<=0){e.state='attack';e.attackTimer=.22;e.cd=e.cd===0?e.cd:({boss:2.05,scout:1.55,blade:1.8,assassin:1.25,caster:2}[e.type]||1.7);if(dist<e.range+40&&!player.invuln){if(player.parryTimer>0){e.hitstun=.65;e.hp-=8;message='PARRY';messageTimer=.5}else if(!player.guard){player.hp-=e.damage;player.hitstun=.22;player.vx=e.face*210;shake=5}else player.stamina=Math.max(0,player.stamina-12)}}}else if(e.state==='attack'){e.attackTimer-=dt;if(e.attackTimer<=0)e.state='approach'}else if(e.state==='cast'&&e.cd<=0){projectiles.push({x:e.x,y:e.y-26,vx:e.face*-190,life:2,damage:e.damage,color:'#75b9cf',from:'enemy',radius:10});e.cd=2;e.state='approach'}e.x=clamp(e.x,25,worldWidth-25)}}
 function update(dt){time+=dt;if(screenMode!=='play'||paused||modalOpen)return;movePlayer(dt);updateEnemies(dt);for(const q of projectiles){q.x+=q.vx*dt;q.life-=dt;if(q.from==='enemy'&&Math.abs(q.x-player.x)<q.radius+20&&Math.abs(q.y-(player.y+20))<35&&player.invuln<=0){if(player.guard){player.stamina-=10}else player.hp-=q.damage;q.life=0}else if(q.from==='player'){for(const e of enemies)if(!e.dead&&Math.abs(q.x-e.x)<q.radius+e.w/2&&Math.abs(q.y-(e.y+20))<e.h/2){damageEnemy(e,q.damage,Math.sign(q.vx)*130);q.life=0;break}}}projectiles=projectiles.filter(q=>q.life>0);particles.forEach(a=>{a.x+=a.vx*dt;a.y+=a.vy*dt;a.vy+=250*dt;a.life-=dt});particles=particles.filter(a=>a.life>0);floaters.forEach(a=>{a.y-=25*dt;a.life-=dt});floaters=floaters.filter(a=>a.life>0);if(comboTimer>0)comboTimer-=dt;else combo=0;shake=Math.max(0,shake-25*dt);cameraX=clamp(player.x-W*.42,0,worldWidth-W);if(messageTimer>0)messageTimer-=dt;
- enemies=enemies.filter(e=>!e.dead||e.hp<=-999);if(enemies.length&&enemies.every(e=>e.dead)){enemies=[];if(wave<3){wave++;player.hp=Math.min(player.maxHp,player.hp+18);player.chakra=Math.min(player.maxChakra,player.chakra+25);showRewards()}else{showVictory()}}}
+ enemies=enemies.filter(e=>!e.dead||e.hp<=-999);if(enemies.length&&enemies.every(e=>e.dead)){enemies=[];completeStoryRoom()}}
 function draw(){ctx.clearRect(0,0,W,H);const sx=(Math.random()-.5)*shake,sy=(Math.random()-.5)*shake;ctx.save();ctx.translate(-cameraX+sx,sy);rect(cameraX,0,W,H,'#202a34');for(let i=0;i<9;i++){let x=i*300;rect(x,120,110,310,i%2?'#293542':'#303a43');rect(x+20,155,72,8,'#46505a');rect(x+35,185,10,75,'#36424e');rect(x+110,300,155,130,'#242f39')}rect(cameraX,GROUND,W,110,'#292b2c');rect(cameraX,GROUND,W,5,'#b67a50');for(let x=0;x<worldWidth;x+=170){rect(x,GROUND+18,100,2,'#393938');rect(x+20,GROUND+38,50,2,'#343535')}
  for(const e of enemies)drawFighter(e,true);if(player)drawFighter(player,false);for(const q of projectiles){ctx.fillStyle=q.color;ctx.beginPath();ctx.arc(q.x,q.y,q.radius,0,Math.PI*2);ctx.fill();ctx.fillRect(q.x-20,q.y-3,20,6)}for(const a of particles){ctx.globalAlpha=clamp(a.life*2,0,1);rect(a.x,a.y,4,4,a.color)}ctx.globalAlpha=1;for(const a of floaters){ctx.globalAlpha=clamp(a.life,0,1);text(a.text,a.x,a.y,13,a.color,'center')}ctx.globalAlpha=1;ctx.restore();drawHud();}
 function drawFighter(o,enemy){let x=o.x,y=o.y,w=o.w,h=o.h;ctx.save();if(o.flash>0&&Math.floor(time*35)%2)ctx.globalAlpha=.5;rect(x-w/2,y+8,w,h-8,enemy?o.color:(saved.identity?.outfit||'#263d55'));rect(x-w/2+3,y,w-6,17,enemy?'#d0a17e':(saved.identity?.skin||'#d69a72'));rect(x-w/2-2,y+4,w+4,5,enemy?'#242832':(saved.identity?.hairColor||'#171922'));rect(x+(o.face>0?2:-w/2),y+9,8,4,'#1c2028');if(!enemy&&saved.identity?.headband)rect(x-w/2-2,y+2,w+4,3,'#b7493e');if(!enemy&&saved.clan==='Uchiha'&&saved.dojutsu)rect(x+(o.face>0?4:-6),y+10,4,2,'#df4545');if(o.attackTimer>0){rect(x+o.face*18,y+18,o.face*30,5,o.attackType==='heavy'?'#ffd17a':'#eee2c9')}ctx.restore()}
@@ -111,10 +197,24 @@ function drawHud(){ctx.fillStyle='#0c1018dd';ctx.fillRect(22,18,300,62);text(sav
 function bar(x,y,w,h,p,c){rect(x,y,w,h,'#34373c');rect(x,y,w*clamp(p,0,1),h,c)}
 function frame(now){let dt=Math.min(.033,(now-last)/1000||0);last=now;if(screenMode==='play'&&!paused&&!modalOpen)update(dt);draw();requestAnimationFrame(frame)}
 let comboStep=0;
-function showRewards(){const options=[['Sharpened Edge','Permanent · +8% attack damage','damage'],['Vitality Seal','Permanent · +10 maximum health','health'],['Chakra Reservoir','Run · restore 35 chakra','chakra']];modalOpen=true;modal.classList.add('open');modal.innerHTML=`<div class="modal-card"><p class="eyebrow">ROOM ${wave-1} CLEARED</p><h2>CHOOSE YOUR REWARD</h2><p>Your room reward is separate from any special Rinnegan roll.</p><div class="reward-grid">${options.map(o=>`<button class="reward-card" data-reward="${o[2]}"><strong>${o[0]}</strong><small>${o[1]}</small></button>`).join('')}</div><div class="modal-actions"><button data-action="continue">CONTINUE</button></div><div id="special-reward"></div></div>`;modal.querySelectorAll('[data-reward]').forEach(b=>b.onclick=()=>{const r=b.dataset.reward;if(r==='damage')saved.damage++;if(r==='health'){saved.health++;player.maxHp+=10;player.hp+=10}if(r==='chakra')player.chakra=Math.min(player.maxChakra,player.chakra+35);saveProgress();b.disabled=true;b.innerHTML='<strong>SELECTED</strong><small>Added to your build.</small>'});
- // This is an independent 0.5% bonus roll; ordinary reward choices remain intact.
- if(!saved.rinnegan&&Math.random()<0.005){saved.rinnegan=true;saveProgress();const area=modal.querySelector('#special-reward');area.innerHTML='<p class="rinnegan-reveal">✦ MYTHIC REVEAL · RINNEGAN UNLOCKED ✦</p>';}
- modal.querySelector('[data-action=continue]').onclick=()=>{closeModal();spawnWave()}}
+function showRewards(){
+ const count=storyRewardCount||4;
+ const options=storyRewardOptions(count);
+ modalOpen=true;modal.classList.add('open');
+ modal.innerHTML=`<div class="modal-card reward-modal"><p class="eyebrow">ROOM ${roomIndex+1} CLEARED · ${roomIndex===4?'BOSS':roomIndex===3?'MINI-BOSS':roomIndex===2?'ELITE':'STANDARD'}</p><h2>CHOOSE ONE REWARD</h2><p>Exactly one card may be selected. The remaining choices will disappear.</p><div class="reward-grid" style="grid-template-columns:repeat(${options.length},minmax(90px,1fr))">${options.map(r=>`<button class="reward-card" data-card="${r.code}"><span class="rarity rarity-${r.rarity.toLowerCase()}">${r.rarity}</span><strong>${r.art} ${r.name}</strong><small>${r.category} · Temporary</small><small>${r.effect}</small><small>${r.description}</small></button>`).join('')}</div><div class="modal-actions"><button data-action="continue" disabled>CONTINUE</button></div><div id="special-reward"></div></div>`;
+ modal.querySelectorAll('[data-card]').forEach(b=>b.onclick=()=>{
+  if(runSelectedReward)return;runSelectedReward=true;
+  const card=RUN_CARD_DB.find(r=>r.code===b.dataset.card);if(!card)return;
+  applyRunReward(card.code);
+  modal.querySelectorAll('[data-card]').forEach(x=>{x.disabled=true;x.classList.remove('selected')});
+  b.classList.add('selected');
+  b.innerHTML=`<span class="rarity rarity-${card.rarity.toLowerCase()}">${card.rarity}</span><strong>✓ ${card.name}</strong><small>SELECTED · ${card.effect}</small><small>${card.description}</small>`;
+  modal.querySelector('[data-action=continue]').disabled=false;
+ });
+ // Independent 0.5% Rinnegan reveal: ordinary choices are unaffected.
+ if(!saved.rinnegan&&Math.random()<0.005){saved.rinnegan=true;saveProgress();modal.querySelector('#special-reward').innerHTML='<p class="rinnegan-reveal">✦ MYTHIC REVEAL · RINNEGAN UNLOCKED ✦</p>';}
+ modal.querySelector('[data-action=continue]').onclick=()=>{if(runSelectedReward)finishRoomChoice();};
+}
 function showVictory(){screenMode='victory';modalOpen=true;modal.classList.add('open');modal.innerHTML=`<div class="modal-card"><p class="eyebrow">THE PASS IS QUIET</p><h2>WARDEN DEFEATED</h2><p>Run rewards: ${runCoins} embers · ${killCount} foes defeated. Permanent records remain yours after defeat.</p><div class="modal-actions"><button data-action="home">RETURN TO TITLE</button><button data-action="restart">RUN AGAIN</button></div></div>`;saved.shards+=runCoins;saveProgress();modal.querySelector('[data-action=home]').onclick=showTitle;modal.querySelector('[data-action=restart]').onclick=initRun}
 function showDefeat(){modalOpen=true;modal.classList.add('open');modal.innerHTML=`<div class="modal-card"><p class="eyebrow">THE BORDER CLAIMS ANOTHER</p><h2>RUN ENDED</h2><p>Collected ${runCoins} embers. Temporary run bonuses are lost; permanent identity and unlocks are safe.</p><div class="modal-actions"><button data-action="home">RETURN TO TITLE</button><button data-action="restart">TRY AGAIN</button></div></div>`;saved.shards+=runCoins;saveProgress();modal.querySelector('[data-action=home]').onclick=showTitle;modal.querySelector('[data-action=restart]').onclick=initRun}
 function showTitle(){screenMode='title';paused=false;modalOpen=false;modal.classList.remove('open');screen.classList.add('visible')}
