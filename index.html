@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#10131c" />
+  <title>Shinobi: Ashes of the Hidden Leaf</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main id="game-shell" aria-label="Shinobi action roguelike game">
+    <canvas id="game" width="960" height="540" aria-label="Side scrolling ninja action game"></canvas>
+    <section id="screen" class="screen visible" aria-live="polite">
+      <div class="menu-card">
+        <p class="eyebrow">A SHINOBI ACTION ROGUELIKE</p>
+        <h1>ASHES <span>OF THE</span><br/>HIDDEN LEAF</h1>
+        <p class="subtitle">The border shrine has gone silent. Find the source.<br/>Fight clean. Move fast. Leave no opening.</p>
+        <div class="menu-actions">
+          <button id="start-run" class="primary">BEGIN THE RUN <b>↗</b></button>
+          <button id="open-controls" class="secondary">CONTROLS &amp; LAYOUT</button>
+          <button id="open-progression" class="secondary">SHINOBI RECORD</button>
+          <button id="open-spins" class="secondary">SPIN SCROLLS</button>
+        </div>
+        <div class="menu-foot"><span>WASD / ARROWS TO MOVE</span><span>J ATTACK · SPACE JUMP · SHIFT DASH</span></div>
+      </div>
+      <div class="menu-mark">火</div>
+    </section>
+    <section id="modal" class="modal" aria-live="polite"></section>
+    <div id="touch-controls" aria-label="Touch controls">
+      <div id="stick-zone" class="stick-zone"><div id="stick-base"><div id="stick-knob"></div></div></div>
+      <div class="touch-cluster left-cluster">
+        <button data-action="skill1" class="touch skill">KUNAI</button>
+        <button data-action="block" class="touch defense">GUARD</button>
+      </div>
+      <div class="touch-cluster right-cluster">
+        <button data-action="jump" class="touch jump">JUMP</button>
+        <button data-action="skill2" class="touch skill">JUTSU</button>
+        <button data-action="heavy" class="touch heavy">HEAVY</button>
+        <button data-action="dash" class="touch dash">DASH</button>
+        <button data-action="attack" class="touch attack">STRIKE</button>
+      </div>
+    </div>
+    <button id="pause-button" aria-label="Pause game">Ⅱ</button>
+    <div id="rotate-hint">ROTATE YOUR DEVICE TO LANDSCAPE</div>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
